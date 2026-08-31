@@ -8,7 +8,7 @@ sudo apt-get update
 sudo apt-get install -y sudo lsb-release file nano git curl python3 python3-pillow imagemagick librsvg2-bin ccache
 sudo dpkg --add-architecture i386; sudo apt-get update; sudo apt-get install -y libgcc-s1:i386
 
-# Настройка ccache для сохранения промежуточных скомпилированных файлов
+# Настройка кэширования ccache
 export CCACHE_DIR=~/.cache/ccache
 mkdir -p $CCACHE_DIR
 ccache --max-size=9G
@@ -45,11 +45,11 @@ cp $SCRIPT_DIR/args.gn out/Default/args.gn
 gn gen out/Default # gn args out/Default; echo 'treat_warnings_as_errors = false' >> out/Default/args.gn
 mkdir -p out/tmp out/release
 
-# Сборка ТОЛЬКО 64-битного arm64-v8a APK (Вариант 2)
+# Сборка 64-битного arm64-v8a APK
 autoninja -C out/Default chrome_public_apk
 mv $(find out/Default/apks -name 'Chrome*.apk') out/tmp/$VERSION-arm64-v8a.apk
 
-# Заглушки для 32-бит и AAB
+# Заглушки для остального
 touch out/tmp/$VERSION-armeabi-v7a.apk
 touch out/tmp/$VERSION-arm64-v8a.aab
 
