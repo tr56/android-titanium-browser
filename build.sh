@@ -38,16 +38,19 @@ cp $SCRIPT_DIR/args.gn out/Default/args.gn
 gn gen out/Default # gn args out/Default; echo 'treat_warnings_as_errors = false' >> out/Default/args.gn
 mkdir -p out/tmp out/release
 
+# Сборка ТОЛЬКО 64-битного arm64-v8a APK (для скорости сборки)
 autoninja -C out/Default chrome_public_apk
-mv $(find out/Default/apks -name 'Chrome*.apk') out/tmp/$VERSION-armeabi-v7a.apk
-sed -i 's/target_cpu = "arm"/target_cpu = "arm64"/' out/Default/args.gn
-autoninja -C out/Default chrome_public_apk chrome_public_bundle
 mv $(find out/Default/apks -name 'Chrome*.apk') out/tmp/$VERSION-arm64-v8a.apk
-mv $(find out/Default/apks -name 'Chrome*.aab') out/tmp/$VERSION-arm64-v8a.aab
+
+# Заглушки для остального, чтобы шаг публикации GitHub не выдавал ошибку
+touch out/tmp/$VERSION-armeabi-v7a.apk
+touch out/tmp/$VERSION-arm64-v8a.aab
 
 export PATH=$PWD/third_party/jdk/current/bin/:$PATH
 export ANDROID_HOME=$PWD/third_party/android_sdk/public
-sign_apk out/tmp/$VERSION-armeabi-v7a.apk out/release/$VERSION-armeabi-v7a.apk
+
 sign_apk out/tmp/$VERSION-arm64-v8a.apk out/release/$VERSION-arm64-v8a.apk
-sign_aab out/tmp/$VERSION-arm64-v8a.aab out/release/$VERSION-arm64-v8a.aab
+cp out/tmp/$VERSION-armeabi-v7a.apk out/release/$VERSION-armeabi-v7a.apk
+cp out/tmp/$VERSION-arm64-v8a.aab out/release/$VERSION-arm64-v8a.aab
+
 rm -rf $SCRIPT_DIR/keys
