@@ -24,7 +24,6 @@ jobs:
         with:
           submodules: true
 
-      # Сохранение и восстановление кэша компилятора ccache между запусками
       - name: Cache ccache
         uses: actions/cache@v4
         with:
@@ -58,9 +57,17 @@ jobs:
             LOCAL_TEST_JKS: ${{ secrets.LOCAL_TEST_JKS }}
             STORE_TEST_JKS: ${{ secrets.STORE_TEST_JKS }}
         run: |
-          timeout 5h 15m ./build.sh || echo "Достигнут лимит 5ч 15м. Остановка для сохранения кэша ccache..."
+          status=0
+          timeout 5h 15m ./build.sh || status=$?
+          if [ $status -eq 124 ]; then
+            echo "Достигнут лимит 5ч 15м. Остановка для сохранения кэша ccache..."
+          elif [ $status -ne 0 ]; then
+            echo "Скрипт завершился с ошибкой: $status"
+            exit $status
+          fi
 
       - name: Set
+        if: hashFiles('chromium/src/out/release/*arm64-v8a.apk') != ''
         run: |
           export VERSION=$(find chromium/src/out/release -name '*arm64-v8a.apk' | sed 's/.*\///;s/\-arm64-v8a.apk$//')
           echo "VERSION=$VERSION" >> $GITHUB_ENV
