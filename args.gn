@@ -6,6 +6,7 @@ is_component_build = false
 is_debug = false
 is_official_build = true
 cc_wrapper = "ccache"
+use_siso = false
 symbol_level = 0
 disable_fieldtrial_testing_config = true
 ffmpeg_branding = "Chrome"
@@ -20,7 +21,6 @@ google_api_key = "x"
 google_default_client_id = "x"
 google_default_client_secret = "x"
 
-use_siso = true
 use_login_database_as_backend = true
 build_contextual_search = false
 dcheck_always_on = false
