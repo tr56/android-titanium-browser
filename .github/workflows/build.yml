@@ -24,11 +24,12 @@ jobs:
         with:
           submodules: true
 
+      # Динамический ключ кэша: каждый запуск сохранит новый накопленный прогресс!
       - name: Cache ccache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ccache
-          key: ${{ runner.os }}-ccache-${{ github.sha }}
+          key: ${{ runner.os }}-ccache-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             ${{ runner.os }}-ccache-
       
@@ -60,7 +61,7 @@ jobs:
           status=0
           timeout 315m ./build.sh || status=$?
           if [ $status -eq 124 ]; then
-            echo "Достигнут лимит 5ч 15м. Остановка для сохранения кэша ccache..."
+            echo "Достигнут лимит 5ч 15м. Остановка для сохранения обновленного кэша ccache..."
           elif [ $status -ne 0 ]; then
             echo "Скрипт завершился с ошибкой: $status"
             exit $status
