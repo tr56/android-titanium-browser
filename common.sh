@@ -1,5 +1,3 @@
-export SCRIPT_DIR=$(realpath $(dirname $0))
-
 replace() {
     export org=$2 new=$3
     find $1 -type f -exec sed -i 's@'$org'@'$new'@g' {} \;
@@ -7,8 +5,15 @@ replace() {
 
 set_keys() {
     mkdir -p $SCRIPT_DIR/keys
-    echo $LOCAL_TEST_JKS | base64 -d > $SCRIPT_DIR/keys/local.properties
-    echo $STORE_TEST_JKS | base64 -d > $SCRIPT_DIR/keys/test.jks
+    if [ -n "$LOCAL_TEST_JKS" ] && [ -n "$STORE_TEST_JKS" ]; then
+        echo $LOCAL_TEST_JKS | base64 -d > $SCRIPT_DIR/keys/local.properties
+        echo $STORE_TEST_JKS | base64 -d > $SCRIPT_DIR/keys/test.jks
+    else
+        echo "keyAlias=androiddebugkey" > $SCRIPT_DIR/keys/local.properties
+        echo "keyPassword=android" >> $SCRIPT_DIR/keys/local.properties
+        echo "storePassword=android" >> $SCRIPT_DIR/keys/local.properties
+        keytool -genkey -v -keystore $SCRIPT_DIR/keys/test.jks -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+    fi
     unset LOCAL_TEST_JKS
     unset STORE_TEST_JKS
 }
