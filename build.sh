@@ -8,8 +8,10 @@ sudo apt-get update
 sudo apt-get install -y sudo lsb-release file nano git curl python3 python3-pillow imagemagick librsvg2-bin ccache
 sudo dpkg --add-architecture i386; sudo apt-get update; sudo apt-get install -y libgcc-s1:i386
 
-# Настройка кэширования ccache
+# Оптимальная настройка ccache для Chromium
 export CCACHE_DIR=~/.cache/ccache
+export CCACHE_SLOPPINESS=time_macros,include_file_mtime,file_macro
+export CCACHE_COMPILERCHECK=content
 mkdir -p $CCACHE_DIR
 ccache --max-size=9G
 ccache --set-config=compression=true
@@ -49,7 +51,7 @@ mkdir -p out/tmp out/release
 autoninja -C out/Default chrome_public_apk
 mv $(find out/Default/apks -name 'Chrome*.apk') out/tmp/$VERSION-arm64-v8a.apk
 
-# Заглушки для остального
+# Заглушки для 32-бит и AAB
 touch out/tmp/$VERSION-armeabi-v7a.apk
 touch out/tmp/$VERSION-arm64-v8a.aab
 
