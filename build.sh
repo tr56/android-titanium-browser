@@ -6,18 +6,8 @@ export VERSION=$(grep -m1 -o '[0-9]\+\(\.[0-9]\+\)\{3\}' $SCRIPT_DIR/vanadium/ar
 export CHROMIUM_SOURCE=https://chromium.googlesource.com/chromium/src.git # https://github.com/chromium/chromium.git
 export DEBIAN_FRONTEND=noninteractive
 sudo apt-get update
-sudo apt-get install -y sudo lsb-release file nano git curl python3 python3-pillow imagemagick librsvg2-bin ccache
+sudo apt-get install -y sudo lsb-release file nano git curl python3 python3-pillow imagemagick librsvg2-bin
 sudo dpkg --add-architecture i386; sudo apt-get update; sudo apt-get install -y libgcc-s1:i386
-
-# Настройка кэширования ccache
-export CCACHE_DIR=~/.cache/ccache
-export CCACHE_SLOPPINESS=time_macros,include_file_mtime,file_macro,system_headers
-export CCACHE_BASEDIR=$PWD
-export CCACHE_NOCPP2=true
-mkdir -p $CCACHE_DIR
-ccache --max-size=9.5G
-ccache --set-config=compression=true
-ccache -s
 
 git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git
 export PATH="$PWD/depot_tools:$PATH"
@@ -64,5 +54,4 @@ sign_apk out/tmp/$VERSION-arm64-v8a.apk out/release/$VERSION-arm64-v8a.apk
 cp out/tmp/$VERSION-armeabi-v7a.apk out/release/$VERSION-armeabi-v7a.apk
 cp out/tmp/$VERSION-arm64-v8a.aab out/release/$VERSION-arm64-v8a.aab
 
-ccache -s
 rm -rf $SCRIPT_DIR/keys
