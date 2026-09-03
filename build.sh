@@ -45,7 +45,8 @@ ccache -z
 # ─── depot_tools ───────────────────────────────────────────────────────────
 git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git
 export PATH="$PWD/depot_tools:$PATH"
-export DEPOT_TOOLS_UPDATE=0
+# Явная инициализация: создаёт python3_bin_reldir.txt и прочее, что нужно обёрткам gn/ninja
+./depot_tools/ensure_bootstrap
 
 # ─── Chromium source ───────────────────────────────────────────────────────
 mkdir -p chromium/src/out/Default
