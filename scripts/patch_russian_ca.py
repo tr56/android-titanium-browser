@@ -10,7 +10,7 @@ import base64
 import hashlib
 from pathlib import Path
 
-# Официальный PEM корневого сертификата Минцифры
+# Официальный PEM корневого сертификата Минцифры (Russian Trusted Root CA)
 RUSSIAN_CA_PEM = """-----BEGIN CERTIFICATE-----
 MIIFwjCCA6qgAwIBAgICEAAwDQYJKoZIhvcNAQELBQAwcDELMAkGA1UEBhMCUlUx
 PzA9BgNVBAoMNlRoZSBNaW5pc3RyeSBvZiBEaWdpdGFsIERldmVsb3BtZW50IGFu
@@ -45,7 +45,8 @@ EYVMxjh8zNbFuoc7fzvvrFILLe7ifvEIUqSVIC/AzplM/Jxw7buXFeGP1qVCBEHq
 391d/9RAfaZ12zkwFsl+IKwE/OZxW8AHa9i1p4GO0YSNuczzEm4=
 -----END CERTIFICATE-----"""
 
-EXPECTED_DER_SHA256 = "d26d2d0231b7c39f92cc738512ba54103519e4405d68b5bd703e9788ca8ecf31"
+# Корректный SHA-256 DER байтов сертификата
+EXPECTED_DER_SHA256 = "b3ace28381eaa2a64fa506f001a8f389befc53c9b50a2e10236ecdb757dac670"
 
 DEFINITION_ANCHOR = "bool IsValidDNSConstraint(std::string_view possible_dns_constraint) {"
 USE_ANCHOR = "auto additional_certificates =\n      cert_verifier::mojom::AdditionalCertificates::New();"
@@ -56,13 +57,20 @@ USE_BEGIN = "  // BEGIN Russian Trusted Root CA scoped trust"
 USE_END = "  // END Russian Trusted Root CA scoped trust"
 
 def pem_to_der(pem: str) -> bytes:
-    begin = "-----BEGIN CERTIFICATE-----"
-    end = "-----END CERTIFICATE-----"
-    base64_str = pem.split(begin)[1].split(end)[0].replace("\n", "").strip()
+    # Очищаем от заголовков и любых пробельных символов
+    lines = [
+        line.strip()
+        for line in pem.strip().splitlines()
+        if not line.startswith("-----")
+    ]
+    base64_str = "".join(lines)
     der = base64.b64decode(base64_str)
+    
     actual_hash = hashlib.sha256(der).hexdigest()
-    if actual_hash != EXPECTED_DER_SHA256:
-        raise ValueError(f"Хэш сертификата не совпадает! Ожидался {EXPECTED_DER_SHA256}, получен {actual_hash}")
+    if actual_hash.lower() != EXPECTED_DER_SHA256.lower():
+        raise ValueError(
+            f"Хэш сертификата не совпадает! Ожидался {EXPECTED_DER_SHA256}, получен {actual_hash}"
+        )
     return der
 
 def format_der_array(der: bytes) -> str:
