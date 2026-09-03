@@ -16,6 +16,11 @@ permissions:
   id-token: write
   attestations: write
 
+# Две сборки одновременно бессмысленны: обе восстановят один кэш и перетрут друг друга
+concurrency:
+  group: chromium-build
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.runner || 'ubuntu-latest' }}
@@ -24,23 +29,11 @@ jobs:
         with:
           submodules: true
 
-      # Узнать VERSION раньше, чтобы использовать в ключах кэша
-      - name: Get Chromium version
+      - name: Free disk space
         run: |
-          VERSION=$(grep -m1 -o '[0-9]\+\(\.[0-9]\+\)\{3\}' vanadium/args.gn)
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "Building Chromium $VERSION"
-
-      # ccache — ключ включает версию Chromium
-      # При обновлении Chromium кэш ccache сбрасывается автоматически
-      - name: Cache ccache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ccache
-          key: ccache-${{ env.VERSION }}-v1
-          restore-keys: |
-            ccache-${{ env.VERSION }}-
-            ccache-
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force >/dev/null 2>&1 || true
+          df -h /
 
       - name: Update vanadium
         run: |
@@ -56,38 +49,72 @@ jobs:
             git push
           fi
 
+      # ВАЖНО: версия определяется ПОСЛЕ обновления vanadium,
+      # иначе ключ кэша может не совпасть с реально собираемой версией
+      - name: Get Chromium version
+        run: |
+          VERSION=$(grep -m1 -oE '[0-9]+(\.[0-9]+){3}' vanadium/args.gn)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Building Chromium $VERSION"
+
+      # Ключ уникален для каждого запуска -> primary key никогда не совпадёт ->
+      # восстановление всегда идёт через restore-keys (самый свежий кэш этой версии),
+      # а сохранение в конце всегда создаёт новую запись.
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ env.VERSION }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ env.VERSION }}-
+            ccache-
+
       - name: Set ENV
         run: |
           chmod +x *.sh
           echo "unix_time=$(date +%s)" >> $GITHUB_ENV
 
       - name: Build
+        id: build
         env:
           DEBIAN_FRONTEND: noninteractive
           LOCAL_TEST_JKS: ${{ secrets.LOCAL_TEST_JKS }}
           STORE_TEST_JKS: ${{ secrets.STORE_TEST_JKS }}
-          # ccache env — передаём из workflow чтобы build.sh мог переопределить
-          CCACHE_DIR: /home/runner/.cache/ccache
-          CCACHE_SLOPPINESS: time_macros,include_file_mtime,include_file_ctime,file_stat_matches,file_macro,pch_defines
-          CCACHE_COMPILERCHECK: content
-          CCACHE_COMPRESS: "true"
         run: |
           status=0
-          timeout 315m ./build.sh || status=$?
+          # 300m, а не 315m: нужен запас на упаковку и загрузку кэша (5-6 ГБ = 5-10 минут),
+          # общий лимит job — 360m, и он включает post-шаги
+          timeout --kill-after=30 300m ./build.sh || status=$?
+
+          # build.sh создаёт этот маркер прямо перед началом компиляции.
+          # Сохранять кэш есть смысл только если компиляция начиналась.
+          if [ -f /tmp/compile_started ]; then
+            echo "save_cache=true" >> $GITHUB_OUTPUT
+          fi
+
           if [ $status -eq 124 ]; then
-            echo "Достигнут лимит 5ч 15м. Сохраняем кэш..."
+            echo "Лимит времени достигнут — сборка не завершена, кэш будет сохранён"
           elif [ $status -ne 0 ]; then
-            echo "Ошибка: $status"
+            echo "::error::build.sh завершился с кодом $status"
             exit $status
           fi
 
       - name: ccache stats
         if: always()
         run: |
-          echo "=== ccache final stats ==="
-          ccache --show-stats
+          export CCACHE_DIR=$HOME/.cache/ccache
+          echo "=== ccache stats (только этот прогон) ==="
+          ccache --version | head -1
+          ccache --show-stats -v || ccache --show-stats
           echo "=== cache size ==="
-          du -sh ~/.cache/ccache
+          du -sh $HOME/.cache/ccache
+
+      - name: Save ccache
+        if: always() && steps.build.outputs.save_cache == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ env.VERSION }}-${{ github.run_id }}
 
       - name: Set
         if: hashFiles('chromium/src/out/release/*arm64-v8a.apk') != ''
