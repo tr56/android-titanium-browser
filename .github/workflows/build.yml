@@ -24,37 +24,25 @@ jobs:
         with:
           submodules: true
 
-      # ✅ ИСПРАВЛЕНИЕ 1: фиксированный ключ вместо run_id
-      # Инкрементируйте v1→v2 чтобы принудительно сбросить кэш
+      # Узнать VERSION раньше, чтобы использовать в ключах кэша
+      - name: Get Chromium version
+        run: |
+          VERSION=$(grep -m1 -o '[0-9]\+\(\.[0-9]\+\)\{3\}' vanadium/args.gn)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Building Chromium $VERSION"
+
+      # ccache — ключ включает версию Chromium
+      # При обновлении Chromium кэш ccache сбрасывается автоматически
       - name: Cache ccache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ccache
-          key: ${{ runner.os }}-ccache-v1
+          key: ccache-${{ env.VERSION }}-v1
           restore-keys: |
-            ${{ runner.os }}-ccache-
+            ccache-${{ env.VERSION }}-
+            ccache-
 
-      # ✅ ИСПРАВЛЕНИЕ 2: настройка ccache ДО сборки
-      - name: Configure ccache
-        run: |
-          sudo apt-get install -y ccache 2>/dev/null || true
-          ccache --version
-          # Максимальный размер — важно чтобы не превысить 10GB лимит GitHub
-          ccache --set-config=max_size=8G
-          # Критично для Chromium: слабый режим слипаний
-          ccache --set-config=sloppiness=time_macros,include_file_mtime,include_file_ctime,file_stat_matches
-          # Хэш компилятора по содержимому, не пути
-          ccache --set-config=compiler_check=content
-          # Сжатие для экономии места
-          ccache --set-config=compression=true
-          ccache --set-config=compression_level=6
-          # Показать текущую конфигурацию
-          ccache --show-config
-          # Показать статистику (hit rate из предыдущего запуска)
-          echo "=== ccache stats (from previous run) ==="
-          ccache --show-stats
-
-      - name: Update
+      - name: Update vanadium
         run: |
           cd vanadium
           git fetch --tags
@@ -78,29 +66,27 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
           LOCAL_TEST_JKS: ${{ secrets.LOCAL_TEST_JKS }}
           STORE_TEST_JKS: ${{ secrets.STORE_TEST_JKS }}
-          # ✅ ИСПРАВЛЕНИЕ 3: переменные ccache для Chromium
+          # ccache env — передаём из workflow чтобы build.sh мог переопределить
           CCACHE_DIR: /home/runner/.cache/ccache
-          CCACHE_MAXSIZE: 8G
-          CCACHE_SLOPPINESS: time_macros,include_file_mtime,include_file_ctime,file_stat_matches
+          CCACHE_SLOPPINESS: time_macros,include_file_mtime,include_file_ctime,file_stat_matches,file_macro,pch_defines
           CCACHE_COMPILERCHECK: content
           CCACHE_COMPRESS: "true"
         run: |
           status=0
           timeout 315m ./build.sh || status=$?
           if [ $status -eq 124 ]; then
-            echo "Достигнут лимит 5ч 15м. Остановка для сохранения кэша ccache..."
+            echo "Достигнут лимит 5ч 15м. Сохраняем кэш..."
           elif [ $status -ne 0 ]; then
-            echo "Скрипт завершился с ошибкой: $status"
+            echo "Ошибка: $status"
             exit $status
           fi
 
-      # ✅ ИСПРАВЛЕНИЕ 4: статистика ccache после сборки
       - name: ccache stats
         if: always()
         run: |
-          echo "=== ccache статистика ==="
+          echo "=== ccache final stats ==="
           ccache --show-stats
-          echo "=== Размер кэша ==="
+          echo "=== cache size ==="
           du -sh ~/.cache/ccache
 
       - name: Set
