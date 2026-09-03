@@ -6,9 +6,14 @@ is_component_build = false
 is_debug = false
 is_official_build = true
 
-# КРИТИЧНО ДЛЯ CCACHE:
+# --- КРИТИЧНО ДЛЯ CCACHE И СКОРОСТИ СБОРКИ ---
 cc_wrapper = "ccache"
 clang_use_chrome_plugins = false
+enable_check_raw_ptr_fields = false
+enable_check_raw_ref_fields = false
+enable_precompiled_headers = false
+use_thin_lto = false
+chrome_pgo_phase = 0
 treat_warnings_as_errors = false
 
 use_siso = false
