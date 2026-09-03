@@ -23,19 +23,17 @@ sudo apt-get install -y libgcc-s1:i386
 
 # ─── Настройка ccache под Chromium Clang ──────────────────────────────────
 export CCACHE_DIR="$HOME/.cache/ccache"
-mkdir -p "$CCACHE_DIR"
-
-# Критичные флаги для 95%+ Cacheable и 90%+ Hits:
 export CCACHE_BASEDIR="$SCRIPT_DIR"
 export CCACHE_NOHASHDIR=1
 export CCACHE_COMPILERCHECK=content
-export CCACHE_SLOPPINESS="clang_index_store,file_stat_matches,include_file_ctime,include_file_mtime,modules,pch_defines,system_headers,time_macros"
+export CCACHE_SLOPPINESS="file_macro,time_macros,include_file_mtime,include_file_ctime,file_stat_matches,pch_defines,system_headers"
 
-# Быстрое сжатие для экономии CPU времени GitHub Runner
+mkdir -p "$CCACHE_DIR"
+
 ccache --max-size=9.5G
 ccache --set-config=compression=true
 ccache --set-config=compression_level=1
-ccache --set-config=run_second_cpp=true
+ccache --set-config=ignore_options_matching="*-Xclang*;*plugin*;*-fcrash-diagnostics-dir=*"
 
 echo "=== ccache initial stats ==="
 ccache -s
