@@ -77,16 +77,16 @@ rm -rf "$SCRIPT_DIR"/vanadium/patches/component-updates.patch
 rm -rf "$SCRIPT_DIR"/vanadium/patches/{pdf,PDF,for-content-public,toolbar-button,configs-from-config-app,new-tab-card,predictive-back}*.patch
 rm -rf "$SCRIPT_DIR"/vanadium/patches/crashpad.patch
 
-# Удаление всех патчей Vanadium, обращающихся к app.vanadium.config (устраняет NPE / вылет при старте)
+# Удаление всех патчей Vanadium, обращающихся к app.vanadium.config и GrapheneOS connectivity checks (устраняет вылет и ошибки git am)
 find "$SCRIPT_DIR/vanadium/patches" -type f -name '*config*.patch' ! -name '*cross-origin-referrer*' -delete
 find "$SCRIPT_DIR/vanadium/patches" -type f -name '*content-filtering*.patch' -delete
+find "$SCRIPT_DIR/vanadium/patches" -type f -name '*connectivity-check*' -delete
 rm -f "$SCRIPT_DIR"/vanadium/patches/{0198,0204,0222,0223,0280,0300}*.patch
 
 replace "$SCRIPT_DIR/vanadium/patches" "VANADIUM" "TITANIUM"
 replace "$SCRIPT_DIR/vanadium/patches" "Vanadium" "Titanium"
 replace "$SCRIPT_DIR/vanadium/patches" "vanadium" "titanium"
 
-# Флаг -3 (3-way merge) автоматически сопоставляет смещенные строки в файлах Chromium
 if ! git am -3 --whitespace=nowarn --keep-non-patch "$SCRIPT_DIR"/vanadium/patches/*.patch; then
     echo "::error::Патчи Vanadium не применились"
     git am --show-current-patch=diff | head -40 || true
