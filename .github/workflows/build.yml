@@ -8,6 +8,7 @@ on:
         required: true
         type: string
         default: 'ubuntu-latest'
+
   schedule:
     - cron: '0 0 */16 * *'
 
@@ -16,7 +17,7 @@ permissions:
   id-token: write
   attestations: write
 
-# Две сборки одновременно бессмысленны: обе восстановят один кэш и перетрут друг друга
+# Не позволяем двум сборкам одновременно создавать конкурирующие ccache.
 concurrency:
   group: chromium-build
   cancel-in-progress: false
@@ -24,42 +25,55 @@ concurrency:
 jobs:
   build:
     runs-on: ${{ github.event_name == 'workflow_dispatch' && inputs.runner || 'ubuntu-latest' }}
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           submodules: true
 
       - name: Free disk space
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /opt/ghc \
+            /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL
+
           sudo docker image prune --all --force >/dev/null 2>&1 || true
+
+          echo "=== Available disk space ==="
           df -h /
 
       - name: Update vanadium
         run: |
           cd vanadium
           git fetch --tags
-          git checkout $(git tag | sort -V | tail -n1)
+          git checkout "$(git tag | sort -V | tail -n1)"
           cd ..
+
           git add vanadium
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+
           if ! git diff --staged --quiet; then
-            git commit -am "update"
+            git commit -m "update vanadium"
             git push
           fi
 
-      # ВАЖНО: версия определяется ПОСЛЕ обновления vanadium,
-      # иначе ключ кэша может не совпасть с реально собираемой версией
       - name: Get Chromium version
         run: |
           VERSION=$(grep -m1 -oE '[0-9]+(\.[0-9]+){3}' vanadium/args.gn)
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+          if [ -z "$VERSION" ]; then
+            echo "::error::Не удалось определить Chromium VERSION"
+            exit 1
+          fi
+
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "Building Chromium $VERSION"
 
-      # Ключ уникален для каждого запуска -> primary key никогда не совпадёт ->
-      # восстановление всегда идёт через restore-keys (самый свежий кэш этой версии),
-      # а сохранение в конце всегда создаёт новую запись.
       - name: Restore ccache
         uses: actions/cache/restore@v4
         with:
@@ -69,10 +83,10 @@ jobs:
             ccache-${{ env.VERSION }}-
             ccache-
 
-      - name: Set ENV
+      - name: Set environment
         run: |
           chmod +x *.sh
-          echo "unix_time=$(date +%s)" >> $GITHUB_ENV
+          echo "unix_time=$(date +%s)" >> "$GITHUB_ENV"
 
       - name: Build
         id: build
@@ -82,32 +96,35 @@ jobs:
           STORE_TEST_JKS: ${{ secrets.STORE_TEST_JKS }}
         run: |
           status=0
-          # 300m, а не 315m: нужен запас на упаковку и загрузку кэша (5-6 ГБ = 5-10 минут),
-          # общий лимит job — 360m, и он включает post-шаги
+
+          # 330 минут = 5 часов 30 минут.
+          # Остальные ~30 минут остаются для сохранения кэша, Release и Attestation.
           timeout --kill-after=30 330m ./build.sh || status=$?
 
-          # build.sh создаёт этот маркер прямо перед началом компиляции.
-          # Сохранять кэш есть смысл только если компиляция начиналась.
           if [ -f /tmp/compile_started ]; then
-            echo "save_cache=true" >> $GITHUB_OUTPUT
+            echo "save_cache=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "save_cache=false" >> "$GITHUB_OUTPUT"
           fi
 
-          if [ $status -eq 124 ]; then
-            echo "Лимит времени достигнут — сборка не завершена, кэш будет сохранён"
-          elif [ $status -ne 0 ]; then
+          if [ "$status" -eq 124 ]; then
+            echo "Достигнут лимит 5ч 30м. Кэш ccache будет сохранён."
+          elif [ "$status" -ne 0 ]; then
             echo "::error::build.sh завершился с кодом $status"
-            exit $status
+            exit "$status"
           fi
 
       - name: ccache stats
         if: always()
         run: |
-          export CCACHE_DIR=$HOME/.cache/ccache
-          echo "=== ccache stats (только этот прогон) ==="
+          export CCACHE_DIR="$HOME/.cache/ccache"
+
+          echo "=== ccache stats (current run) ==="
           ccache --version | head -1
           ccache --show-stats -v || ccache --show-stats
+
           echo "=== cache size ==="
-          du -sh $HOME/.cache/ccache
+          du -sh "$CCACHE_DIR" || true
 
       - name: Save ccache
         if: always() && steps.build.outputs.save_cache == 'true'
@@ -116,52 +133,64 @@ jobs:
           path: ~/.cache/ccache
           key: ccache-${{ env.VERSION }}-${{ github.run_id }}
 
-      # Явная проверка APK вместо hashFiles: hashFiles не видит файлы после mv в Set
-      - name: Set
-        id: set
+      # Ищем только непустой APK и копируем его в корень workspace.
+      # cp, а не mv: файл в chromium/src/out/release остаётся на месте.
+      - name: Prepare release APK
+        id: release
         if: success()
+        shell: bash
         run: |
-          APK=$(find chromium/src/out/release -maxdepth 1 -name '*arm64-v8a.apk' | head -n1 || true)
-          AAB=$(find chromium/src/out/release -maxdepth 1 -name '*arm64-v8a.aab' | head -n1 || true)
-          V7A=$(find chromium/src/out/release -maxdepth 1 -name '*armeabi-v7a.apk' | head -n1 || true)
+          set -eo pipefail
 
-          if [ -z "$APK" ] || [ ! -f "$APK" ]; then
-            echo "release_ready=false" >> $GITHUB_OUTPUT
-            echo "::warning::APK не найден в chromium/src/out/release/"
-            echo "Найдено в release:"; ls -la chromium/src/out/release/ || echo "директория пуста или отсутствует"
-            exit 0
+          APK=$(find chromium/src/out/release \
+            -maxdepth 1 \
+            -type f \
+            -name '*-arm64-v8a.apk' \
+            -size +0c \
+            -print -quit)
+
+          if [ -z "$APK" ]; then
+            echo "::error::Не найден непустой подписанный arm64-v8a APK"
+            echo "=== out/release ==="
+            find chromium/src/out/release -maxdepth 1 -type f -ls 2>/dev/null || true
+            exit 1
           fi
 
-          VERSION_FROM_FILE=$(echo "$APK" | sed 's/.*\///;s/\-arm64-v8a\.apk$//')
+          VERSION_FROM_FILE=$(basename "$APK" | sed 's/-arm64-v8a\.apk$//')
+
           if [ -z "$VERSION_FROM_FILE" ]; then
-            VERSION_FROM_FILE="${{ env.VERSION }}"
+            echo "::error::Не удалось получить версию из $APK"
+            exit 1
           fi
-          echo "VERSION=$VERSION_FROM_FILE" >> $GITHUB_ENV
-          echo "release_ready=true" >> $GITHUB_OUTPUT
-          echo "Найдены файлы: APK=$APK AAB=$AAB V7A=$V7A"
 
-          # Переименование для релиза (только если файлы есть)
-          [ -n "$AAB" ] && [ -f "$AAB" ] && mv "$AAB" "$VERSION_FROM_FILE-${{ env.unix_time }}-arm64-v8a.aab" || true
-          [ -n "$APK" ] && [ -f "$APK" ] && mv "$APK" "$VERSION_FROM_FILE-${{ env.unix_time }}-arm64-v8a.apk" || true
-          [ -n "$V7A" ] && [ -f "$V7A" ] && mv "$V7A" "$VERSION_FROM_FILE-${{ env.unix_time }}-armeabi-v7a.apk" || true
+          RELEASE_APK="${VERSION_FROM_FILE}-${{ env.unix_time }}-arm64-v8a.apk"
 
-      - name: Publish
+          cp "$APK" "$RELEASE_APK"
+
+          if [ ! -s "$RELEASE_APK" ]; then
+            echo "::error::Подготовленный для релиза APK пустой"
+            exit 1
+          fi
+
+          echo "VERSION=$VERSION_FROM_FILE" >> "$GITHUB_ENV"
+          echo "RELEASE_APK=$RELEASE_APK" >> "$GITHUB_ENV"
+          echo "apk_found=true" >> "$GITHUB_OUTPUT"
+
+          echo "=== Ready for GitHub Release ==="
+          ls -lh "$RELEASE_APK"
+          sha256sum "$RELEASE_APK"
+
+      - name: Publish release
         uses: softprops/action-gh-release@v2
-        if: steps.set.outputs.release_ready == 'true'
+        if: steps.release.outputs.apk_found == 'true'
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           name: v${{ env.VERSION }}
           tag_name: v${{ env.VERSION }}
-          files: |
-            ${{ env.VERSION }}-${{ env.unix_time }}-arm64-v8a.aab
-            ${{ env.VERSION }}-${{ env.unix_time }}-arm64-v8a.apk
-            ${{ env.VERSION }}-${{ env.unix_time }}-armeabi-v7a.apk
+          files: ${{ env.RELEASE_APK }}
 
-      - name: Attest
+      - name: Attest APK provenance
         uses: actions/attest-build-provenance@v4
-        if: steps.set.outputs.release_ready == 'true'
+        if: steps.release.outputs.apk_found == 'true'
         with:
-          subject-path: |
-            ${{ env.VERSION }}-${{ env.unix_time }}-arm64-v8a.aab
-            ${{ env.VERSION }}-${{ env.unix_time }}-arm64-v8a.apk
-            ${{ env.VERSION }}-${{ env.unix_time }}-armeabi-v7a.apk
+          subject-path: ${{ env.RELEASE_APK }}
