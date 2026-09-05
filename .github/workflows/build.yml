@@ -116,18 +116,38 @@ jobs:
           path: ~/.cache/ccache
           key: ccache-${{ env.VERSION }}-${{ github.run_id }}
 
+      # Явная проверка APK вместо hashFiles: hashFiles не видит файлы после mv в Set
       - name: Set
-        if: hashFiles('chromium/src/out/release/*arm64-v8a.apk') != ''
+        id: set
+        if: success()
         run: |
-          export VERSION=$(find chromium/src/out/release -name '*arm64-v8a.apk' | sed 's/.*\///;s/\-arm64-v8a.apk$//')
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          mv $(find chromium/src/out/release -name '*arm64-v8a.aab') $VERSION-${{ env.unix_time }}-arm64-v8a.aab
-          mv $(find chromium/src/out/release -name '*arm64-v8a.apk') $VERSION-${{ env.unix_time }}-arm64-v8a.apk
-          mv $(find chromium/src/out/release -name '*armeabi-v7a.apk') $VERSION-${{ env.unix_time }}-armeabi-v7a.apk
+          APK=$(find chromium/src/out/release -maxdepth 1 -name '*arm64-v8a.apk' | head -n1 || true)
+          AAB=$(find chromium/src/out/release -maxdepth 1 -name '*arm64-v8a.aab' | head -n1 || true)
+          V7A=$(find chromium/src/out/release -maxdepth 1 -name '*armeabi-v7a.apk' | head -n1 || true)
+
+          if [ -z "$APK" ] || [ ! -f "$APK" ]; then
+            echo "release_ready=false" >> $GITHUB_OUTPUT
+            echo "::warning::APK не найден в chromium/src/out/release/"
+            echo "Найдено в release:"; ls -la chromium/src/out/release/ || echo "директория пуста или отсутствует"
+            exit 0
+          fi
+
+          VERSION_FROM_FILE=$(echo "$APK" | sed 's/.*\///;s/\-arm64-v8a\.apk$//')
+          if [ -z "$VERSION_FROM_FILE" ]; then
+            VERSION_FROM_FILE="${{ env.VERSION }}"
+          fi
+          echo "VERSION=$VERSION_FROM_FILE" >> $GITHUB_ENV
+          echo "release_ready=true" >> $GITHUB_OUTPUT
+          echo "Найдены файлы: APK=$APK AAB=$AAB V7A=$V7A"
+
+          # Переименование для релиза (только если файлы есть)
+          [ -n "$AAB" ] && [ -f "$AAB" ] && mv "$AAB" "$VERSION_FROM_FILE-${{ env.unix_time }}-arm64-v8a.aab" || true
+          [ -n "$APK" ] && [ -f "$APK" ] && mv "$APK" "$VERSION_FROM_FILE-${{ env.unix_time }}-arm64-v8a.apk" || true
+          [ -n "$V7A" ] && [ -f "$V7A" ] && mv "$V7A" "$VERSION_FROM_FILE-${{ env.unix_time }}-armeabi-v7a.apk" || true
 
       - name: Publish
         uses: softprops/action-gh-release@v2
-        if: hashFiles('chromium/src/out/release/*arm64-v8a.apk') != ''
+        if: steps.set.outputs.release_ready == 'true'
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           name: v${{ env.VERSION }}
@@ -139,7 +159,7 @@ jobs:
 
       - name: Attest
         uses: actions/attest-build-provenance@v4
-        if: hashFiles('chromium/src/out/release/*arm64-v8a.apk') != ''
+        if: steps.set.outputs.release_ready == 'true'
         with:
           subject-path: |
             ${{ env.VERSION }}-${{ env.unix_time }}-arm64-v8a.aab
