@@ -58,9 +58,6 @@ ccache -z
 git clone --depth 1 https://chromium.googlesource.com/chromium/tools/depot_tools.git
 export PATH="$PWD/depot_tools:$PATH"
 
-# Создаёт python3_bin_reldir.txt и инициализирует depot_tools.
-./depot_tools/ensure_bootstrap
-
 # ─── Chromium source ───────────────────────────────────────────────────────
 mkdir -p chromium/src/out/Default
 cd chromium/src
@@ -80,7 +77,7 @@ rm -rf "$SCRIPT_DIR"/vanadium/patches/component-updates.patch
 rm -rf "$SCRIPT_DIR"/vanadium/patches/{pdf,PDF,for-content-public,toolbar-button,configs-from-config-app,new-tab-card,predictive-back}*.patch
 rm -rf "$SCRIPT_DIR"/vanadium/patches/crashpad.patch
 
-# Удаление всех патчей Vanadium, обращающихся к несуществующему app.vanadium.config (устраняет NPE / вылет при старте)
+# Удаление всех патчей Vanadium, обращающихся к app.vanadium.config (устраняет NPE / вылет при старте)
 find "$SCRIPT_DIR/vanadium/patches" -type f -name '*config*.patch' ! -name '*cross-origin-referrer*' -delete
 find "$SCRIPT_DIR/vanadium/patches" -type f -name '*content-filtering*.patch' -delete
 rm -f "$SCRIPT_DIR"/vanadium/patches/{0198,0204,0222,0223,0280,0300}*.patch
@@ -89,7 +86,8 @@ replace "$SCRIPT_DIR/vanadium/patches" "VANADIUM" "TITANIUM"
 replace "$SCRIPT_DIR/vanadium/patches" "Vanadium" "Titanium"
 replace "$SCRIPT_DIR/vanadium/patches" "vanadium" "titanium"
 
-if ! git am --whitespace=nowarn --keep-non-patch "$SCRIPT_DIR"/vanadium/patches/*.patch; then
+# Флаг -3 (3-way merge) автоматически сопоставляет смещенные строки в файлах Chromium
+if ! git am -3 --whitespace=nowarn --keep-non-patch "$SCRIPT_DIR"/vanadium/patches/*.patch; then
     echo "::error::Патчи Vanadium не применились"
     git am --show-current-patch=diff | head -40 || true
     exit 1
@@ -194,7 +192,7 @@ export PATH="$PWD/third_party/jdk/current/bin:$PATH"
 export ANDROID_HOME="$PWD/third_party/android_sdk/public"
 
 echo "=== Signing APK ==="
-echo "Input: $UNSIGNED_APK"
+echo "Input:  $UNSIGNED_APK"
 echo "Output: $SIGNED_APK"
 
 sign_apk "$UNSIGNED_APK" "$SIGNED_APK"
