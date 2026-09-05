@@ -20,8 +20,16 @@ set_keys() {
 
 sign_apk() {
     export apksigner=$(find $ANDROID_HOME/build-tools -name apksigner | sort | tail -n 1)
+    export zipalign=$(find $ANDROID_HOME/build-tools -name zipalign | sort | tail -n 1)
     source $SCRIPT_DIR/keys/local.properties
-    $apksigner sign -verbose -ks $SCRIPT_DIR/keys/test.jks --ks-pass pass:$storePassword --key-pass pass:$keyPassword --ks-key-alias $keyAlias --out $2 $1 || exit 1
+
+    echo "=== Aligning APK (4KB alignment for native .so libraries) ==="
+    $zipalign -f -p 4 4096 "$1" "$1.aligned.apk" || exit 1
+
+    echo "=== Signing APK with apksigner ==="
+    $apksigner sign -verbose -ks $SCRIPT_DIR/keys/test.jks --ks-pass pass:$storePassword --key-pass pass:$keyPassword --ks-key-alias $keyAlias --out "$2" "$1.aligned.apk" || exit 1
+
+    rm -f "$1.aligned.apk"
 }
 
 sign_aab() {
