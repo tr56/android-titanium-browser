@@ -77,10 +77,11 @@ rm -rf "$SCRIPT_DIR"/vanadium/patches/component-updates.patch
 rm -rf "$SCRIPT_DIR"/vanadium/patches/{pdf,PDF,for-content-public,toolbar-button,configs-from-config-app,new-tab-card,predictive-back}*.patch
 rm -rf "$SCRIPT_DIR"/vanadium/patches/crashpad.patch
 
-# Удаление всех патчей Vanadium, обращающихся к app.vanadium.config и GrapheneOS connectivity checks (устраняет вылет и ошибки git am)
+# Удаление всех патчей Vanadium, обращающихся к app.vanadium.config, connectivity-check и несовместимому импорту закладок
 find "$SCRIPT_DIR/vanadium/patches" -type f -name '*config*.patch' ! -name '*cross-origin-referrer*' -delete
 find "$SCRIPT_DIR/vanadium/patches" -type f -name '*content-filtering*.patch' -delete
 find "$SCRIPT_DIR/vanadium/patches" -type f -name '*connectivity-check*' -delete
+find "$SCRIPT_DIR/vanadium/patches" -type f -name '*bookmarks*.patch' -delete
 rm -f "$SCRIPT_DIR"/vanadium/patches/{0198,0204,0222,0223,0280,0300}*.patch
 
 replace "$SCRIPT_DIR/vanadium/patches" "VANADIUM" "TITANIUM"
