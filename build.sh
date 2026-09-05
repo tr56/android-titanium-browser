@@ -80,6 +80,11 @@ rm -rf "$SCRIPT_DIR"/vanadium/patches/component-updates.patch
 rm -rf "$SCRIPT_DIR"/vanadium/patches/{pdf,PDF,for-content-public,toolbar-button,configs-from-config-app,new-tab-card,predictive-back}*.patch
 rm -rf "$SCRIPT_DIR"/vanadium/patches/crashpad.patch
 
+# Удаление всех патчей Vanadium, обращающихся к несуществующему app.vanadium.config (устраняет NPE / вылет при старте)
+find "$SCRIPT_DIR/vanadium/patches" -type f -name '*config*.patch' ! -name '*cross-origin-referrer*' -delete
+find "$SCRIPT_DIR/vanadium/patches" -type f -name '*content-filtering*.patch' -delete
+rm -f "$SCRIPT_DIR"/vanadium/patches/{0198,0204,0222,0223,0280,0300}*.patch
+
 replace "$SCRIPT_DIR/vanadium/patches" "VANADIUM" "TITANIUM"
 replace "$SCRIPT_DIR/vanadium/patches" "Vanadium" "Titanium"
 replace "$SCRIPT_DIR/vanadium/patches" "vanadium" "titanium"
@@ -189,7 +194,7 @@ export PATH="$PWD/third_party/jdk/current/bin:$PATH"
 export ANDROID_HOME="$PWD/third_party/android_sdk/public"
 
 echo "=== Signing APK ==="
-echo "Input:  $UNSIGNED_APK"
+echo "Input: $UNSIGNED_APK"
 echo "Output: $SIGNED_APK"
 
 sign_apk "$UNSIGNED_APK" "$SIGNED_APK"
