@@ -1,11 +1,24 @@
 chrome_public_manifest_package = "io.github.jqssun.helium"
 is_desktop_android = true
 target_os = "android"
-target_cpu = "arm"
+target_cpu = "arm64"
 is_component_build = false
 is_debug = false
 is_official_build = true
-symbol_level = 1
+
+# --- КРИТИЧНО ДЛЯ CCACHE И СКОРОСТИ СБОРКИ ---
+cc_wrapper = "ccache"
+clang_use_chrome_plugins = false
+use_clang_modules = false
+enable_check_raw_ptr_fields = false
+enable_check_raw_ref_fields = false
+enable_precompiled_headers = false
+use_thin_lto = false
+chrome_pgo_phase = 0
+treat_warnings_as_errors = false
+
+use_siso = false
+symbol_level = 0
 disable_fieldtrial_testing_config = true
 ffmpeg_branding = "Chrome"
 proprietary_codecs = true
@@ -19,7 +32,6 @@ google_api_key = "x"
 google_default_client_id = "x"
 google_default_client_secret = "x"
 
-use_siso = true
 use_login_database_as_backend = true
 build_contextual_search = false
 dcheck_always_on = false
@@ -34,5 +46,5 @@ enable_dav1d_decoder = true
 include_both_v8_snapshots = false
 include_both_v8_snapshots_android_secondary_abi = false
 v8_enable_drumbrake = true
-v8_drumbrake_bounds_checks = true 
-generate_linker_map = true
+v8_drumbrake_bounds_checks = true
+generate_linker_map = false
