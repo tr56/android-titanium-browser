@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
   id-token: write
   attestations: write
 
@@ -91,21 +92,42 @@ jobs:
           LOCAL_TEST_JKS: ${{ secrets.LOCAL_TEST_JKS }}
           STORE_TEST_JKS: ${{ secrets.STORE_TEST_JKS }}
         run: |
+          set -o pipefail
           status=0
           # 330 минут = 5 часов 30 минут.
           # Остальные ~30 минут остаются для сохранения кэша, Release и Attestation.
-          timeout --kill-after=30 330m ./build.sh || status=$?
+          timeout --kill-after=30 330m ./build.sh 2>&1 | tee /tmp/build.log || status=$?
+
           if [ -f /tmp/compile_started ]; then
             echo "save_cache=true" >> "$GITHUB_OUTPUT"
           else
             echo "save_cache=false" >> "$GITHUB_OUTPUT"
           fi
+
+          LAST=$(grep -oE '^\[[0-9]+/[0-9]+\]' /tmp/build.log 2>/dev/null | tail -1 || true)
+
           if [ "$status" -eq 124 ]; then
-            echo "Достигнут лимит 5ч 30м. Кэш ccache будет сохранён."
-          elif [ "$status" -ne 0 ]; then
+            {
+              echo "## ⏱ Достигнут лимит 5ч30м — сборка не завершена"
+              echo ""
+              echo "Последний прогресс компиляции: **${LAST:-нет данных}**"
+              echo ""
+              echo "Это **ожидаемый** этап стратегии «несколько заходов»:"
+              echo "ccache уже сохранён, и следующий прогон пропустит собранное."
+              echo ""
+              echo "**Что делать:** Actions → Build → Run workflow. Файлы менять не нужно."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Лимит 5ч30м (${LAST:-нет данных}). Кэш ccache сохранён. Запустите Run workflow ещё раз — файлы менять НЕ нужно, кэш подхватится автоматически."
+            exit 1
+          fi
+
+          if [ "$status" -ne 0 ]; then
             echo "::error::build.sh завершился с кодом $status"
+            tail -40 /tmp/build.log
             exit "$status"
           fi
+
+          echo "### ✔ Сборка завершена: ${LAST:-готово}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: ccache stats
         if: always()
@@ -117,12 +139,45 @@ jobs:
           echo "=== cache size ==="
           du -sh "$CCACHE_DIR" || true
 
+          # Сводка в Job Summary: по ней сразу видно, подхватился ли кэш.
+          STATS=$(ccache --print-stats 2>/dev/null || true)
+          HITS=$(echo "$STATS" | awk -F'\t' '/^(direct_cache_hit|preprocessed_cache_hit|remote_storage_hit)/{h+=$2} END{print h+0}')
+          MISS=$(echo "$STATS" | awk -F'\t' '/^cache_miss/{print $2+0}')
+          {
+            echo ""
+            echo "### ccache в этом прогоне"
+            echo ""
+            echo "| показатель | значение |"
+            echo "|---|---|"
+            echo "| попаданий (hits) | ${HITS:-0} |"
+            echo "| промахов (misses) | ${MISS:-0} |"
+            echo ""
+            echo "Холодный прогон ≈ 0 попаданий. Со второго прогона должно быть много попаданий."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Save ccache
         if: always() && steps.build.outputs.save_cache == 'true'
         uses: actions/cache/save@v4
         with:
           path: ~/.cache/ccache
           key: ccache-${{ env.VERSION }}-${{ github.run_id }}
+
+      # Держим в репозитории один актуальный кэш: он надмножество предыдущих.
+      # Без этого 3-4 прогона упрутся в лимит GitHub в 10 GiB и кэш вытеснится.
+      - name: Purge old ccache entries
+        if: always() && steps.build.outputs.save_cache == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          KEEP="ccache-${{ env.VERSION }}-${{ github.run_id }}"
+          echo "Оставляем: $KEEP"
+          gh cache list -R "${{ github.repository }}" --limit 100 --json id,key \
+            --jq ".[] | select(.key | startswith(\"ccache-\")) | select(.key != \"$KEEP\") | .id" \
+            | while read -r id; do
+                echo "Удаляю старый кэш id=$id"
+                gh cache delete "$id" -R "${{ github.repository }}" || true
+              done
 
       # Ищем только непустой APK и копируем его в корень workspace.
       # cp, а не mv: файл в chromium/src/out/release остаётся на месте.
