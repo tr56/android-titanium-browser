@@ -7,7 +7,9 @@ on:
         description: 'Runner'
         required: true
         type: string
-        default: 'ubuntu-latest'
+        # Явная привязка к 24.04: с 19.10.2026 ярлык ubuntu-latest переедет на
+        # Ubuntu 26, а смена окружения ломает применимость ccache.
+        default: 'ubuntu-24.04'
 
   schedule:
     - cron: '0 0 */16 * *'
@@ -94,9 +96,9 @@ jobs:
         run: |
           set -o pipefail
           status=0
-          # 330 минут = 5 часов 30 минут.
-          # Остальные ~30 минут остаются для сохранения кэша, Release и Attestation.
-          timeout --kill-after=30 330m ./build.sh 2>&1 | tee /tmp/build.log || status=$?
+          # 345 минут = 5 часов 45 минут. Жёсткий лимит GitHub на job — 6 часов,
+          # поэтому остаётся ~12 минут на сохранение кэша, Release и Attestation.
+          timeout --kill-after=30 345m ./build.sh 2>&1 | tee /tmp/build.log || status=$?
 
           if [ -f /tmp/compile_started ]; then
             echo "save_cache=true" >> "$GITHUB_OUTPUT"
