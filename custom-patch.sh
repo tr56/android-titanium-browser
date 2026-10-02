@@ -130,4 +130,134 @@ for gn_file in gn_files:
         print(f"[custom] Предупреждение: {target} не найден в {gn_file}")
 EOF
 
+echo "=== [custom] Исправление закрытия попапа расширений при выборе файла (Issue #252) ==="
+
+python3 - << 'EOF'
+from pathlib import Path
+
+popup_files = list(Path(".").rglob("ExtensionActionPopup.java"))
+assert popup_files, "ExtensionActionPopup.java не найден"
+
+for popup_file in popup_files:
+    content = popup_file.read_text(encoding="utf-8")
+    if "mIsIntentActive" in content:
+        print(f"[custom] ExtensionActionPopup.java уже пропатчен: {popup_file}")
+        continue
+
+    # 1. Добавляем флаг активного Intent/File Chooser
+    target_field = 'private final ContentView mContentView;'
+    assert target_field in content, "target_field не найден в ExtensionActionPopup.java"
+    content = content.replace(target_field, target_field + '\n\n    private boolean mIsIntentActive;')
+
+    # 2. Перехватываем запуск системных Intent (выбор файла) в ActivityWindowAndroid
+    target_window = '''        mPopupWindowAndroid =
+                new ActivityWindowAndroid(
+                        activity,
+                        /* listenToActivityState= */ true,
+                        NullUtil.assumeNonNull(windowAndroid.getIntentRequestTracker()),
+                        /* insetObserver= */ null,
+                        /* occlusionTrackingAllowed= */ true) {
+                    @Override
+                    public @Nullable ModalDialogManager getModalDialogManager() {
+                        return windowAndroid.getModalDialogManager();
+                    }
+                };'''
+
+    new_window = '''        mPopupWindowAndroid =
+                new ActivityWindowAndroid(
+                        activity,
+                        /* listenToActivityState= */ false,
+                        NullUtil.assumeNonNull(windowAndroid.getIntentRequestTracker()),
+                        /* insetObserver= */ null,
+                        /* occlusionTrackingAllowed= */ true) {
+                    @Override
+                    public @Nullable ModalDialogManager getModalDialogManager() {
+                        return windowAndroid.getModalDialogManager();
+                    }
+
+                    @Override
+                    public int showCancelableIntent(
+                            android.content.Intent intent,
+                            @Nullable IntentCallback callback,
+                            @Nullable Integer errorId) {
+                        mIsIntentActive = true;
+                        return super.showCancelableIntent(
+                                intent,
+                                (resultCode, results) -> {
+                                    mIsIntentActive = false;
+                                    if (callback != null) {
+                                        callback.onIntentCompleted(resultCode, results);
+                                    }
+                                },
+                                errorId);
+                    }
+
+                    @Override
+                    public int showCancelableIntent(
+                            android.app.PendingIntent intent,
+                            @Nullable IntentCallback callback,
+                            @Nullable Integer errorId) {
+                        mIsIntentActive = true;
+                        return super.showCancelableIntent(
+                                intent,
+                                (resultCode, results) -> {
+                                    mIsIntentActive = false;
+                                    if (callback != null) {
+                                        callback.onIntentCompleted(resultCode, results);
+                                    }
+                                },
+                                errorId);
+                    }
+                };'''
+
+    assert target_window in content, "target_window не найден в ExtensionActionPopup.java"
+    content = content.replace(target_window, new_window)
+
+    # 3. Предотвращаем закрытие AnchoredPopupWindow во время выбора файла
+    target_popup = '''        mPopupWindow =
+                new AnchoredPopupWindow(
+                        activity,
+                        activity.getWindow().getDecorView(),
+                        new ColorDrawable(Color.WHITE),
+                        mThinWebView.getView(),
+                        new ViewRectProvider(anchorView));'''
+
+    new_popup = '''        mPopupWindow =
+                new AnchoredPopupWindow(
+                        activity,
+                        activity.getWindow().getDecorView(),
+                        new ColorDrawable(Color.WHITE),
+                        mThinWebView.getView(),
+                        new ViewRectProvider(anchorView)) {
+                    @Override
+                    public void dismiss() {
+                        if (mIsIntentActive) {
+                            return;
+                        }
+                        super.dismiss();
+                    }
+                };'''
+
+    assert target_popup in content, "target_popup не найден в ExtensionActionPopup.java"
+    content = content.replace(target_popup, new_popup)
+
+    # 4. При явном уничтожении сбрасываем флаг
+    target_destroy = '''    @Override
+    public void destroy() {
+        mTabModelSelector.getCurrentTabSupplier().removeObserver(mCurrentTabObserver);
+        mPopupWindow.dismiss();'''
+
+    new_destroy = '''    @Override
+    public void destroy() {
+        mTabModelSelector.getCurrentTabSupplier().removeObserver(mCurrentTabObserver);
+        mIsIntentActive = false;
+        mPopupWindow.dismiss();'''
+
+    assert target_destroy in content, "target_destroy не найден в ExtensionActionPopup.java"
+    content = content.replace(target_destroy, new_destroy)
+
+    popup_file.write_text(content, encoding="utf-8")
+    print(f"[custom] Патч сохранения попапа расширений при выборе файла применён к {popup_file}")
+EOF
+
 echo "=== [custom] Готово ==="
