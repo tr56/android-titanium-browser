@@ -110,4 +110,24 @@ constexpr uint8_t kRussianTrustedRootCaDer[] = {{
     print(f"[custom] Патч Минцифры применён к {target} (.ru, .xn--p1ai, .su)")
 EOF
 
+echo "=== [custom] Исправление GN-зависимости bookmark_import_export_helper -> user_data_importer mojom ==="
+
+python3 - << 'EOF'
+from pathlib import Path
+
+gn_files = list(Path(".").rglob("chrome/browser/bookmarks/android/BUILD.gn"))
+for gn_file in gn_files:
+    content = gn_file.read_text(encoding="utf-8")
+    if "//components/user_data_importer/mojom" in content:
+        print(f"[custom] mojom dependency already in {gn_file}")
+        continue
+    target = '"//chrome/browser/bookmarks",'
+    if target in content:
+        content = content.replace(target, target + '\n    "//components/user_data_importer/mojom",')
+        gn_file.write_text(content, encoding="utf-8")
+        print(f"[custom] Добавлена зависимость //components/user_data_importer/mojom в {gn_file}")
+    else:
+        print(f"[custom] Предупреждение: {target} не найден в {gn_file}")
+EOF
+
 echo "=== [custom] Готово ==="
