@@ -94,23 +94,19 @@ jobs:
           LOCAL_TEST_JKS: ${{ secrets.LOCAL_TEST_JKS }}
           STORE_TEST_JKS: ${{ secrets.STORE_TEST_JKS }}
         run: |
+          # Сразу разрешаем сохранение ccache, чтобы при любом прерывании шаг сохранения сработал
+          echo "save_cache=true" >> "$GITHUB_OUTPUT"
           set -o pipefail
           status=0
-          # 345 минут = 5 часов 45 минут. Жёсткий лимит GitHub на job — 6 часов,
-          # поэтому остаётся ~12 минут на сохранение кэша, Release и Attestation.
-          timeout --kill-after=30 345m ./build.sh 2>&1 | tee /tmp/build.log || status=$?
-
-          if [ -f /tmp/compile_started ]; then
-            echo "save_cache=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "save_cache=false" >> "$GITHUB_OUTPUT"
-          fi
+          # 320 минут = 5 часов 20 минут. Это гарантирует 40 минут запаса до любого
+          # внешнего лимита GitHub Actions (6 часов), сохраняя кэш и формируя релиз.
+          timeout --kill-after=30 320m ./build.sh 2>&1 | tee /tmp/build.log || status=$?
 
           LAST=$(grep -oE '^\[[0-9]+/[0-9]+\]' /tmp/build.log 2>/dev/null | tail -1 || true)
 
-          if [ "$status" -eq 124 ]; then
+          if [ "$status" -eq 124 ] || [ "$status" -eq 143 ]; then
             {
-              echo "## ⏱ Достигнут лимит 5ч30м — сборка не завершена"
+              echo "## ⏱ Достигнут лимит времени шага — сборка не завершена"
               echo ""
               echo "Последний прогресс компиляции: **${LAST:-нет данных}**"
               echo ""
@@ -119,7 +115,7 @@ jobs:
               echo ""
               echo "**Что делать:** Actions → Build → Run workflow. Файлы менять не нужно."
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::Лимит 5ч30м (${LAST:-нет данных}). Кэш ccache сохранён. Запустите Run workflow ещё раз — файлы менять НЕ нужно, кэш подхватится автоматически."
+            echo "::error::Лимит времени (${LAST:-нет данных}). Кэш ccache сохранён. Запустите Run workflow ещё раз — файлы менять НЕ нужно, кэш подхватится автоматически."
             exit 1
           fi
 
