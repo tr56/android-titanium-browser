@@ -136,6 +136,7 @@ python3 - << 'EOF'
 import re
 from pathlib import Path
 
+# 1. Патчим ExtensionActionPopup.java
 popup_files = list(Path(".").rglob("ExtensionActionPopup.java"))
 assert popup_files, "ExtensionActionPopup.java не найден"
 
@@ -145,14 +146,14 @@ for popup_file in popup_files:
         print(f"[custom] ExtensionActionPopup.java уже пропатчен: {popup_file}")
         continue
 
-    # 1. Добавляем поле mIsIntentActive
+    # Добавляем поле mIsIntentActive и геттер
     content, n1 = re.subn(
         r'(private\s+final\s+ContentView\s+mContentView;)',
-        r'\1\n    private boolean mIsIntentActive;',
+        r'\1\n    private boolean mIsIntentActive;\n\n    public boolean isIntentActive() {\n        return mIsIntentActive;\n    }',
         content
     )
 
-    # 2. Перехватываем системные Intent (выбор файла) в ActivityWindowAndroid
+    # Перехватываем системные Intent (выбор файла) в ActivityWindowAndroid
     replacement_window = '''mPopupWindowAndroid =
                 new ActivityWindowAndroid(
                         activity,
@@ -178,6 +179,9 @@ for popup_file in popup_files:
                                     if (callback != null) {
                                         callback.onIntentCompleted(resultCode, results);
                                     }
+                                    if (!mPopupWindow.isShowing()) {
+                                        mPopupWindow.show();
+                                    }
                                 },
                                 errorId);
                     }
@@ -195,6 +199,29 @@ for popup_file in popup_files:
                                     if (callback != null) {
                                         callback.onIntentCompleted(resultCode, results);
                                     }
+                                    if (!mPopupWindow.isShowing()) {
+                                        mPopupWindow.show();
+                                    }
+                                },
+                                errorId);
+                    }
+
+                    @Override
+                    public int showCancelableIntent(
+                            org.chromium.base.Callback<android.util.Pair<Integer, android.content.Intent>> intentTrigger,
+                            @Nullable IntentCallback callback,
+                            @Nullable Integer errorId) {
+                        mIsIntentActive = true;
+                        return super.showCancelableIntent(
+                                intentTrigger,
+                                (resultCode, results) -> {
+                                    mIsIntentActive = false;
+                                    if (callback != null) {
+                                        callback.onIntentCompleted(resultCode, results);
+                                    }
+                                    if (!mPopupWindow.isShowing()) {
+                                        mPopupWindow.show();
+                                    }
                                 },
                                 errorId);
                     }
@@ -203,7 +230,7 @@ for popup_file in popup_files:
     pattern_window = r'mPopupWindowAndroid\s*=\s*new\s+ActivityWindowAndroid\s*\([^;]+?getModalDialogManager\(\)\s*\{[^}]+?\}[^;]*?\};'
     content, n2 = re.subn(pattern_window, replacement_window, content, flags=re.DOTALL)
 
-    # 3. Блокируем закрытие AnchoredPopupWindow при активном выборе файла
+    # Блокируем закрытие AnchoredPopupWindow при активном выборе файла
     pattern_popup = r'mPopupWindow\s*=\s*new\s+AnchoredPopupWindow\s*\([^;]+?new\s+ViewRectProvider\(anchorView\)\);'
     replacement_popup = '''mPopupWindow =
                 new AnchoredPopupWindow(
@@ -223,7 +250,7 @@ for popup_file in popup_files:
 
     content, n3 = re.subn(pattern_popup, replacement_popup, content, flags=re.DOTALL)
 
-    # 4. В destroy() сбрасываем флаг
+    # В destroy() сбрасываем флаг
     pattern_destroy = r'(public\s+void\s+destroy\(\)\s*\{[^}]+?removeObserver\(mCurrentTabObserver\);)'
     content, n4 = re.subn(pattern_destroy, r'\1\n        mIsIntentActive = false;', content, flags=re.DOTALL)
 
@@ -231,7 +258,29 @@ for popup_file in popup_files:
         f"[custom] Ошибка наложения патча на {popup_file}: n1={n1}, n2={n2}, n3={n3}, n4={n4}"
 
     popup_file.write_text(content, encoding="utf-8")
-    print(f"[custom] Патч сохранения попапа расширений при выборе файла применён к {popup_file}")
+    print(f"[custom] Патч сохранения попапа расширений применён к {popup_file}")
+
+# 2. Патчим ExtensionActionListMediator.java (предотвращаем уничтожение попапа при onDismiss во время выбора файла)
+mediator_files = list(Path(".").rglob("ExtensionActionListMediator.java"))
+assert mediator_files, "ExtensionActionListMediator.java не найден"
+
+for mediator_file in mediator_files:
+    content = mediator_file.read_text(encoding="utf-8")
+    if "isIntentActive" in content:
+        print(f"[custom] ExtensionActionListMediator.java уже пропатчен: {mediator_file}")
+        continue
+
+    pattern_mediator = r'(ActionState\.PopupActive\s+actionState\s*=\s*\(ActionState\.PopupActive\)\s*mActionState;)'
+    replacement_mediator = r'''\1
+        if (actionState.getPopup().isIntentActive()) {
+            return;
+        }'''
+
+    content, nm = re.subn(pattern_mediator, replacement_mediator, content)
+    assert nm == 1, f"[custom] Не удалось вставить проверку isIntentActive в {mediator_file}"
+
+    mediator_file.write_text(content, encoding="utf-8")
+    print(f"[custom] Патч ExtensionActionListMediator применён к {mediator_file}")
 EOF
 
 echo "=== [custom] Готово ==="
