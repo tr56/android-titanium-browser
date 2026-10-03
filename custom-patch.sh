@@ -208,7 +208,7 @@ for popup_file in popup_files:
 
                     @Override
                     public int showCancelableIntent(
-                            org.chromium.base.Callback<android.util.Pair<Integer, android.content.Intent>> intentTrigger,
+                            org.chromium.base.Callback<Integer> intentTrigger,
                             @Nullable IntentCallback callback,
                             @Nullable Integer errorId) {
                         mIsIntentActive = true;
