@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Кастомные патчи Titanium (накладываются ПОСЛЕ upstream patch.sh).
-# Минцифры root CA, ограниченный зонами .ru / .xn--p1ai (.рф) / .su.
+# 1. Минцифры root CA, ограниченный зонами .ru / .xn--p1ai (.рф) / .su.
+# 2. Исправление GN-зависимости bookmark_import_export_helper -> mojom.
+# 3. Сохранение попапа расширений и WebContents при системном выборе файлов (Issue #252).
 #
 # ВАЖНО: этот файл отдельный, чтобы patch.sh можно было обновлять копированием
 # из upstream без повторного вклеивания блока Минцифры.
 
-# Скрипт сорсится из build.sh: ошибка здесь должна останавливать сборку,
-# а не оставлять APK без корневого сертификата.
 set -euo pipefail
 
 echo "=== [custom] Патч Минцифры CA (scoped .ru, .xn--p1ai, .su) ==="
@@ -153,7 +153,7 @@ for popup_file in popup_files:
         content
     )
 
-    # Перехватываем системные Intent (выбор файла) в ActivityWindowAndroid
+    # Создаём mPopupWindowAndroid до setDelegates и передаём его в webContents.setDelegates
     replacement_window = '''mPopupWindowAndroid =
                 new ActivityWindowAndroid(
                         activity,
@@ -225,9 +225,18 @@ for popup_file in popup_files:
                                 },
                                 errorId);
                     }
-                };'''
+                };
 
-    pattern_window = r'mPopupWindowAndroid\s*=\s*new\s+ActivityWindowAndroid\s*\([^;]+?getModalDialogManager\(\)\s*\{[^}]+?\}[^;]*?\};'
+        { View decor = activity.getWindow().getDecorView(); webContents.setSize(decor.getWidth(), decor.getHeight()); }
+
+        webContents.setDelegates(
+                VersionInfo.getProductVersion(),
+                ViewAndroidDelegate.createBasicDelegate(mContentView),
+                mContentView,
+                mPopupWindowAndroid,
+                WebContents.createDefaultInternalsHolder());'''
+
+    pattern_window = r'''webContents\.setDelegates\(\s*VersionInfo\.getProductVersion\(\),\s*ViewAndroidDelegate\.createBasicDelegate\(mContentView\),\s*mContentView,\s*windowAndroid,\s*WebContents\.createDefaultInternalsHolder\(\)\);(\s*\{[^\}]+\}\s*)?mPopupWindowAndroid\s*=\s*new\s+ActivityWindowAndroid\s*\([^;]+?getModalDialogManager\(\)\s*\{[^}]+?\}[^;]*?\};'''
     content, n2 = re.subn(pattern_window, replacement_window, content, flags=re.DOTALL)
 
     # Блокируем закрытие AnchoredPopupWindow при активном выборе файла
@@ -250,15 +259,25 @@ for popup_file in popup_files:
 
     content, n3 = re.subn(pattern_popup, replacement_popup, content, flags=re.DOTALL)
 
+    # Защита в mCurrentTabObserver
+    pattern_tab_observer = r'mCurrentTabObserver\s*=\s*tab\s*->\s*\{[^;]+?mPopupWindow\.dismiss\(\);\s*\}\s*\};'
+    replacement_tab_observer = '''mCurrentTabObserver =
+                tab -> {
+                    if (mPopupWindow.isShowing() && !mIsIntentActive) {
+                        mPopupWindow.dismiss();
+                    }
+                };'''
+    content, n4 = re.subn(pattern_tab_observer, replacement_tab_observer, content, flags=re.DOTALL)
+
     # В destroy() сбрасываем флаг
     pattern_destroy = r'(public\s+void\s+destroy\(\)\s*\{[^}]+?removeObserver\(mCurrentTabObserver\);)'
-    content, n4 = re.subn(pattern_destroy, r'\1\n        mIsIntentActive = false;', content, flags=re.DOTALL)
+    content, n5 = re.subn(pattern_destroy, r'\1\n        mIsIntentActive = false;', content, flags=re.DOTALL)
 
-    assert n1 == 1 and n2 == 1 and n3 == 1 and n4 == 1, \
-        f"[custom] Ошибка наложения патча на {popup_file}: n1={n1}, n2={n2}, n3={n3}, n4={n4}"
+    assert n1 == 1 and n2 == 1 and n3 == 1 and n4 == 1 and n5 == 1, \
+        f"[custom] Ошибка наложения патча на {popup_file}: n1={n1}, n2={n2}, n3={n3}, n4={n4}, n5={n5}"
 
     popup_file.write_text(content, encoding="utf-8")
-    print(f"[custom] Патч сохранения попапа расширений применён к {popup_file}")
+    print(f"[custom] Патч сохранения попапа расширений при выборе файла применён к {popup_file}")
 
 # 2. Патчим ExtensionActionListMediator.java (предотвращаем уничтожение попапа при onDismiss во время выбора файла)
 mediator_files = list(Path(".").rglob("ExtensionActionListMediator.java"))
